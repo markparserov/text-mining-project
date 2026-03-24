@@ -1,29 +1,32 @@
 # Текст-майнинг рецензий на книги
 
-Репозиторий объединяет три рабочих контура:
+Проект для анализа русскоязычных книжных рецензий в 3 шага:
 
-1. `preprocessing_pipeline` — извлечение и структурирование данных из `.rtf/.doc/.docx` рецензий в единый JSONL.
-2. `gigachat_absa_reviews.py` — ABSA (Aspect-Based Sentiment Analysis) по JSONL.
-3. `fuzzy_bertopic_paper_pipeline.py` + ноутбуки — тематическое моделирование и аналитика.
+1. **Препроцессинг документов** (`.rtf/.doc/.docx`) в структурированный JSONL через `preprocessing_pipeline`.
+2. **ABSA (Aspect-Based Sentiment Analysis)** через GigaChat: извлечение аспектов и их тональности (`POS`/`NEG`) из текста рецензии.
+3. **Тематическое моделирование через LDA-бейзлайн и Fuzzy BERTopic** (по мотивам статьи Nikbakht & Zojaji, 2026): эмбеддинги -> UMAP -> fuzzy C-means -> топ-слова тем через `TI/TIadj`.
 
-## Структура репозитория
+Также есть ноутбуки для последующего анализа результатов.
 
-- `preprocessing_pipeline/` — двухпроходный LLM-пайплайн препроцессинга документов рецензий.
-- `gigachat_absa_reviews.py` — ABSA для JSONL набора рецензий.
-- `fuzzy_bertopic_paper_pipeline.py` — Fuzzy BERTopic / paper-style pipeline.
-- `absa_score_correlation.ipynb` — анализ связи ABSA-метрик и оценки рецензии.
-- `bertopic_lda_analysis.ipynb` — расширенная аналитика тем и когерентности.
-- `requirements.txt` — зависимости ABSA + topic modelling части.
-- `environment.yml` — conda-окружение для запуска всего репозитория, включая `preprocessing_pipeline`.
+## Состав проекта
+
+- `preprocessing_pipeline/` — CLI-пайплайн извлечения структурированных полей из `.rtf/.doc/.docx` (каталог `тексты/`) в JSONL.
+- `gigachat_absa_reviews.py` — ABSA на JSONL с рецензиями.
+- `fuzzy_bertopic_paper_pipeline.py` — fuzzy BERTopic с мягким распределением по темам.
+- `absa_score_correlation.ipynb` — проверка связи оценок рецензий (`score`) с ABSA-метриками.
+- `bertopic_lda_analysis.ipynb` — визуализации и расширенный анализ результатов тематического моделирования (fuzzy BERTopic + LDA).
+- `requirements.txt` — зависимости для ABSA и тематического моделирования.
+- `environment.yml` — conda-окружение для запуска всего репозитория, включая препроцессинг.
+
+В репозитории хранится код и ноутбуки. **Данные и тяжёлые артефакты** (входные документы, выходные JSONL/эмбеддинги/чекпоинты и т.п.) создаются **локально** при запуске скриптов.
 
 ## Требования
 
-- Python 3.11 (рекомендуется conda).
-- Доступ к API GigaChat для сценариев с GigaChat.
-- Опционально локальный OpenAI-совместимый vLLM endpoint для `preprocessing_pipeline`.
+- Python 3.10+ (рекомендуется conda-окружение).
+- Доступ к API GigaChat для ABSA и/или fallback в препроцессинге.
 - LibreOffice (`soffice`) для fallback-извлечения текста из `.doc/.rtf`.
 
-## Установка окружения
+## Установка
 
 Рекомендуемый вариант:
 
@@ -32,144 +35,171 @@ conda env create -f environment.yml
 conda activate textmining
 ```
 
-Если окружение уже существует:
+Альтернатива:
 
 ```bash
-conda activate textmining
-conda env update -f environment.yml --prune
+conda create -n text-mining-project python=3.11 -y
+conda activate text-mining-project
+pip install -r requirements.txt
 ```
 
-## Быстрый старт по этапам
+## 0) Запуск препроцессинга документов
 
-### 1) Препроцессинг документов (`preprocessing_pipeline`)
-
-Пайплайн запускается как модуль:
+Базовый запуск (с параметрами-плейсхолдерами):
 
 ```bash
 python -m preprocessing_pipeline.cli process \
-  --input-dir тексты \
-  --output output.jsonl \
-  --checkpoint-dir .checkpoints \
-  --max-workers 4
+  --input-dir <INPUT_DIR> \
+  --output <OUTPUT_JSONL> \
+  --checkpoint-dir <CHECKPOINT_DIR> \
+  --max-workers <N_WORKERS>
 ```
 
-Поддерживаемые входные форматы: `.docx`, `.doc`, `.rtf`.
+Схема работы пайплайна:
 
-### Что делает `preprocessing_pipeline`
+`SOURCE_DOCUMENTS -> text extraction -> Pass 1 (review extraction) -> Pass 2 (section segmentation) -> normalization/validation -> JSONL records`
 
-1. Рекурсивно ищет документы в `--input-dir`.
-2. Отфильтровывает служебные файлы и дедуплицирует дубли по stem в папке с приоритетом `docx > doc > rtf`.
-3. Извлекает текст:
-   - `.docx` через `python-docx`;
-   - `.rtf` через `striprtf` с очисткой шума и fallback через LibreOffice;
-   - `.doc` через LibreOffice `soffice --headless --convert-to txt` и fallback через OLE-потоки.
-4. Выполняет 2 LLM-прохода:
-   - **Pass 1**: извлечение рецензий и метаданных;
-   - **Pass 2**: сегментация рецензии на тематические секции.
-5. Нормализует ответы в единую схему, валидирует поля и пишет выход в JSONL.
-6. Ведет чекпоинт `processed_sources.txt` для продолжения прерванного запуска.
+Детализация этапов:
 
-### Ключевые опции `preprocessing_pipeline`
+1. **Обнаружение источников**: рекурсивный поиск документов поддерживаемых форматов и устранение технических дублей.
+2. **Извлечение текста**: конвертация в текстовый слой, нормализация кодировок и очистка служебного шума.
+3. **Pass 1**: структурирование документа в список рецензий с метаданными (книга, номинация, оценочные поля, очищенный текст).
+4. **Pass 2**: сегментация каждой рецензии на содержательные секции (`title`, `description`, `text`).
+5. **Валидация**: приведение результата к единой схеме и контроль обязательных полей.
+6. **Сохранение и возобновление**: запись результата в JSONL и ведение checkpoint-файла для устойчивых перезапусков.
 
-- `--env-file` — путь к `.env`.
-- `--model` — модель GigaChat.
-- `--use-vllm-only` — запуск только через vLLM без GigaChat токена.
-- `--enable-vllm-fallback` — fallback на vLLM при ошибках GigaChat.
-- `--vllm-base-url`, `--vllm-model`, `--vllm-api-key` — параметры OpenAI-совместимого endpoint.
-- `--max-workers` — параллелизм (1..64).
-- `--limit` — обработать только первые N файлов.
+### Модель и serving для препроцессинга
 
-### Переменные окружения для `preprocessing_pipeline`
+Для vLLM-режима в проекте используется модель [Qwen/Qwen3.5-35B-A3B](https://huggingface.co/Qwen/Qwen3.5-35B-A3B).  
+Для serving рекомендуется [vllm-project/vllm](https://github.com/vllm-project/vllm) (OpenAI-compatible API).
 
-Минимум для GigaChat-режима:
+Схема запуска через vLLM-only:
+
+```bash
+python -m preprocessing_pipeline.cli process \
+  --input-dir <INPUT_DIR> \
+  --output <OUTPUT_JSONL> \
+  --checkpoint-dir <CHECKPOINT_DIR> \
+  --use-vllm-only \
+  --vllm-base-url <VLLM_BASE_URL> \
+  --vllm-model Qwen/Qwen3.5-35B-A3B \
+  --vllm-api-key <VLLM_API_KEY>
+```
+
+Минимальные переменные окружения (если используете `.env`):
 
 ```bash
 GIGACHAT_AUTH_TOKEN=...
 GIGACHAT_SCOPE=GIGACHAT_API_PERS
+VLLM_BASE_URL=<VLLM_BASE_URL>
+VLLM_MODEL=Qwen/Qwen3.5-35B-A3B
+VLLM_API_KEY=<VLLM_API_KEY>
 ```
 
-Для vLLM (опционально):
+## Формат входных данных
 
-```bash
-VLLM_BASE_URL=http://127.0.0.1:8004/v1
-VLLM_MODEL=qwen3.5
-VLLM_API_KEY=EMPTY
-```
+ABSA и тематическое моделирование работают с JSONL (один JSON-объект на строку, UTF-8).
 
-### Формат выходной записи `preprocessing_pipeline`
-
-Каждая строка выходного JSONL содержит структуру рецензии с полями:
-
-- `year`, `reviewer_id`
-- `book_authors`, `book_title`, `book_reference`, `nomination`
-- `review_text_raw`, `review_text_clean`
-- `sections` (список блоков `title/description/text`)
-- `rating_overall`, `rating_details`
-- `source_path`
-
-### Логи и артефакты `preprocessing_pipeline`
-
-- Основной результат: файл из `--output` (обычно `output.jsonl`).
-- Чекпоинты: каталог из `--checkpoint-dir`.
-- Логи: стандартный stdout/stderr; для долгих запусков можно сохранять в файл (`... > run.log 2>&1`).
-
-### 2) ABSA через GigaChat
-
-ABSA-скрипт ожидает JSONL, где в записи есть хотя бы одно из полей:
+Минимально в записи должен быть хотя бы один из полей текста:
 
 - `review_text_clean`
 - `review_text_raw`
 - `review_text`
 
-Пример запуска:
+Абстрактная схема записи:
+
+```json
+{
+  "year": "<YEAR>",
+  "reviewer_id": "<REVIEWER_ID>",
+  "book_title": "<BOOK_TITLE>",
+  "score": "<OPTIONAL_SCORE>",
+  "review_text_clean": "<TEXT>"
+}
+```
+
+Подготовьте свой JSONL с рецензиями (или используйте уже предобработанный файл у себя на диске) и укажите к нему путь в командах ниже.
+
+## 1) Запуск ABSA через GigaChat
+
+Перед запуском настройте переменные окружения для SDK `gigachat` (например, через `.env`).
+
+Схема запуска:
 
 ```bash
 python gigachat_absa_reviews.py \
-  --input-jsonl /absolute/path/reviews.jsonl \
-  --output-jsonl /absolute/path/absa_output.jsonl \
-  --model GigaChat-Pro \
-  --temperature 0.0 \
-  --max-retries 10 \
-  --timeout-sec 60 \
-  --sleep-between-requests-ms 100 \
-  --save-every 1
+  --input-jsonl <INPUT_JSONL> \
+  --output-jsonl <OUTPUT_JSONL> \
+  --model <GIGACHAT_MODEL> \
+  --temperature <TEMPERATURE> \
+  --max-retries <MAX_RETRIES> \
+  --timeout-sec <TIMEOUT_SEC> \
+  --sleep-between-requests-ms <DELAY_MS> \
+  --save-every <SAVE_EVERY_N>
 ```
 
-Скрипт дописывает `absa_items`, `absa_error`, `absa_model`, `absa_prompt_version`.
+Что добавляется в каждую запись:
 
-### 3) Тематическое моделирование (Fuzzy BERTopic + LDA baseline)
+- `absa_items` — список аспектно-сентиментных кортежей:
+  - `target`
+  - `polarity` (`POS`/`NEG`)
+  - `expressions` (список фраз-оснований)
+- `absa_error` — ошибка обработки (если была)
+- `absa_model` — имя модели
+- `absa_prompt_version` — версия промпта
 
-Пример запуска:
+Опция `--debug-save-raw` сохраняет сырой ответ модели в `raw_payload_json`.
+
+Итоговый JSONL с `absa_items` сохраняется в путь из `--output-jsonl`. Те же результаты можно анализировать в `absa_score_correlation.ipynb` (в ноутбуке укажите путь к своему файлу ABSA).
+
+## 2) Запуск fuzzy BERTopic + анализ результатов тематического моделирования
+
+Схема запуска:
 
 ```bash
 python fuzzy_bertopic_paper_pipeline.py \
-  --input-jsonl /absolute/path/reviews.jsonl \
-  --output-dir /absolute/path/topic_modelling_output \
-  --embedding-model deepvk/USER-bge-m3 \
-  --num-topics 10 \
-  --top-words 10 \
-  --rank-coeff inverse \
-  --seed 42 \
-  --umap-neighbors 15 \
-  --umap-components 5 \
-  --doc-embedding-batch-size 2 \
-  --term-embedding-batch-size 2 \
-  --min-df 2 \
-  --max-vocab-size 20000 \
-  --absent-similarity -2.0
+  --input-jsonl <INPUT_JSONL> \
+  --output-dir <OUTPUT_DIR> \
+  --embedding-model <EMBEDDING_MODEL> \
+  --num-topics <NUM_TOPICS> \
+  --top-words <TOP_WORDS> \
+  --rank-coeff <RANK_COEFF> \
+  --seed <SEED> \
+  --umap-neighbors <N_NEIGHBORS> \
+  --umap-components <N_COMPONENTS> \
+  --doc-embedding-batch-size <DOC_BATCH> \
+  --term-embedding-batch-size <TERM_BATCH> \
+  --min-df <MIN_DF> \
+  --max-vocab-size <MAX_VOCAB> \
+  --absent-similarity <ABSENT_SIMILARITY>
 ```
 
-Типичные артефакты в `--output-dir`:
+Основные выходные файлы в `--output-dir`:
 
-- `paper_doc_topics.jsonl`
-- `paper_topic_info.jsonl`
-- `paper_doc_embeddings.npy`
-- `paper_doc_embeddings_reduced.npy`
-- `paper_term_embeddings.npz`
+- `paper_doc_topics.jsonl` — документы с:
+  - `dominant_topic`
+  - `topic_membership` (мягкое распределение вероятностей по темам)
+- `paper_topic_info.jsonl` — топ-слова и веса по каждой теме.
+- `paper_doc_embeddings.npy` — эмбеддинги документов.
+- `paper_doc_embeddings_reduced.npy` — UMAP-проекции документов.
+- `paper_term_embeddings.npz` — эмбеддинги термов.
+- `paper_vocab_scores.jsonl` — опционально при `--write-vocab-scores`.
+
+Кэширование:
+
+- По умолчанию скрипт переиспользует `paper_doc_embeddings.npy` и `paper_doc_embeddings_reduced.npy`, если размерности совпадают.
+- Для отключения используйте `--no-reuse-embeddings`.
+
+В каталоге `--output-dir` появятся `paper_doc_topics.jsonl`, `paper_topic_info.jsonl`, эмбеддинги и при необходимости другие файлы; метрики когерентности и таблицы из ноутбука — по путям, которые вы зададите при анализе. Визуализации и расчёты — в `bertopic_lda_analysis.ipynb` (пути к `paper_*` артефактам задайте в первых ячейках).
 
 ## Ноутбуки
 
-- `absa_score_correlation.ipynb` — метрики `pos_share`/`neg_share` и корреляция с `score`.
-- `bertopic_lda_analysis.ipynb` — визуализации тем, когерентность, сравнение с LDA.
+- `absa_score_correlation.ipynb`
+  - считает метрики `pos_share`, `neg_share`.
+  - анализирует корреляцию с итоговым `score`.
+- `bertopic_lda_analysis.ipynb`
+  - анализирует результаты `paper_*` артефактов,
+  - строит визуализации и считает метрики когерентности,
+  - содержит блоки для LDA-сравнения.
 
-Перед запуском ноутбуков обновите пути к вашим локальным данным в первых ячейках.
+Перед запуском ноутбуков проверьте пути к входным файлам в первых ячейках.
