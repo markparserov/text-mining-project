@@ -6,9 +6,9 @@ from pathlib import Path
 import click
 from tqdm import tqdm
 
-from pipeline.config import load_config
-from pipeline.gigachat_client import GigaChatClient
-from pipeline.processing import run_pipeline
+from preprocessing_pipeline.config import load_config
+from preprocessing_pipeline.gigachat_client import GigaChatClient
+from preprocessing_pipeline.processing import run_pipeline
 
 
 class TqdmLoggingHandler(logging.Handler):

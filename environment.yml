@@ -4,13 +4,17 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  - hdbscan
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - scikit-learn
   - pip:
-      - gigachat
+      - -r requirements.txt
       - python-docx
       - pydantic>=2.0
       - click
-      - python-dotenv
-      - tqdm
       - tenacity
       - olefile
       - striprtf

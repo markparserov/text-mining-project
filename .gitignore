@@ -1,6 +1,11 @@
 тексты/
 output/
 .checkpoints*/
+topic_modelling_results/
+absa_score_metrics.csv
+pipeline_description.txt
+llm_output_data_schema.txt
+nomination_counts_from_raw_text.txt
 
 .DS_Store
 .qodo

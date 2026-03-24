@@ -8,10 +8,10 @@ from typing import Callable, List
 
 from tqdm import tqdm
 
-from pipeline.extraction import SourceFile, discover_source_files, extract_text
-from pipeline.gigachat_client import GigaChatClient
-from pipeline.models import Pass1Result, Pass2Result, ReviewRecord
-from pipeline.prompts import (
+from preprocessing_pipeline.extraction import SourceFile, discover_source_files, extract_text
+from preprocessing_pipeline.gigachat_client import GigaChatClient
+from preprocessing_pipeline.models import Pass1Result, Pass2Result, ReviewRecord
+from preprocessing_pipeline.prompts import (
     PASS1_SYSTEM_PROMPT,
     PASS2_SYSTEM_PROMPT,
     build_pass1_function,
@@ -19,7 +19,7 @@ from pipeline.prompts import (
     build_pass2_function,
     build_pass2_user_prompt,
 )
-from pipeline.utils import (
+from preprocessing_pipeline.utils import (
     append_jsonl,
     append_processed_source,
     ensure_directory,
