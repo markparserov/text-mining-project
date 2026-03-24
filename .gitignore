@@ -1,0 +1,12 @@
+.DS_Store
+.qodo
+__pycache__/
+.cursor/
+.env
+.conda/
+.ipynb_checkpoints/
+*.log
+*.pid
+*.doc
+*.docx
+*.rtf
