@@ -14,6 +14,8 @@
 - `absa_score_correlation.ipynb` — проверка связи оценок рецензий (`score`) с ABSA-метриками.
 - `bertopic_lda_analysis.ipynb` — визуализации и расширенный анализ результатов тематического моделирования (fuzzy BERTopic + LDA).
 - `requirements.txt` — зависимости.
+- `pipeline/` — CLI-пайплайн извлечения структурированных полей из RTF-рецензий (каталог `тексты/`) в JSONL через GigaChat; см. `pipeline_description.txt`.
+- `environment.yml` — conda-окружение для этого пайплайна (при необходимости отдельно от `requirements.txt`).
 
 В репозитории хранится код и ноутбуки. **Данные и тяжёлые артефакты** (входной JSONL с рецензиями, выход ABSA, `topic_modelling_results/` с эмбеддингами и т.п.) создаются **локально** при запуске скриптов.
 
