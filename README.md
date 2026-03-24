@@ -13,10 +13,9 @@
 - `fuzzy_bertopic_paper_pipeline.py` — fuzzy BERTopic с мягким распределением по темам.
 - `absa_score_correlation.ipynb` — проверка связи оценок рецензий (`score`) с ABSA-метриками.
 - `bertopic_lda_analysis.ipynb` — визуализации и расширенный анализ результатов тематического моделирования (fuzzy BERTopic + LDA).
-- `preprocessed_reviews.jsonl` — готовый файл с предобработанными рецензиями (вход для обоих пайплайнов).
-- `ABSA_resuts_gigachat_pro.jsonl` — готовый файл с результатами ABSA-анализа через GigaChat Pro.
-- `topic_modelling_results/` — папка с готовыми результатами fuzzy BERTopic (`paper_doc_topics.jsonl`, `paper_topic_info.jsonl`, метрики в `.csv`, кэшированные эмбеддинги в `.npy`и `.npz`).
 - `requirements.txt` — зависимости.
+
+В репозитории хранится код и ноутбуки. **Данные и тяжёлые артефакты** (входной JSONL с рецензиями, выход ABSA, `topic_modelling_results/` с эмбеддингами и т.п.) создаются **локально** при запуске скриптов.
 
 ## Требования
 
@@ -49,9 +48,7 @@ pip install -r requirements.txt
 {"year": 2024, "reviewer_id": "R13", "book_title": "Русская ловушка", "score": 9.3, "review_text_clean": "Работа выполнена на достойном уровне..."}
 ```
 
-Готовый входной файл в этом проекте:
-
-- `preprocessed_reviews.jsonl` — основной датасет предобработанных рецензий, который используется в примерах запуска ниже.
+Подготовьте свой JSONL с рецензиями (или используйте уже предобработанный файл у себя на диске) и укажите к нему путь в командах ниже.
 
 ## 1) Запуск ABSA через GigaChat
 
@@ -61,8 +58,8 @@ pip install -r requirements.txt
 
 ```bash
 python gigachat_absa_reviews.py \
-  --input-jsonl /absolute/path/preprocessed_reviews.jsonl \
-  --output-jsonl /absolute/path/ABSA_resuts_gigachat_pro.jsonl \
+  --input-jsonl /absolute/path/reviews.jsonl \
+  --output-jsonl /absolute/path/absa_output.jsonl \
   --model GigaChat-Pro \
   --temperature 0.0 \
   --max-retries 10 \
@@ -83,10 +80,7 @@ python gigachat_absa_reviews.py \
 
 Опция `--debug-save-raw` сохраняет сырой ответ модели в `raw_payload_json`.
 
-Файл с результатами ABSA в этом проекте:
-
-- `ABSA_resuts_gigachat_pro.jsonl` — итоговый JSONL с `absa_items` и связанными полями для каждой рецензии.
-- Результаты ABSA-анализа также можно смотреть в `absa_score_correlation.ipynb`.
+Итоговый JSONL с `absa_items` сохраняется в путь из `--output-jsonl`. Те же результаты можно анализировать в `absa_score_correlation.ipynb` (в ноутбуке укажите путь к своему файлу ABSA).
 
 ## 2) Запуск fuzzy BERTopic + анализ результатов тематического моделирования
 
@@ -94,8 +88,8 @@ python gigachat_absa_reviews.py \
 
 ```bash
 python fuzzy_bertopic_paper_pipeline.py \
-  --input-jsonl /absolute/path/preprocessed_reviews.jsonl \
-  --output-dir /absolute/path/topic_modelling_results \
+  --input-jsonl /absolute/path/reviews.jsonl \
+  --output-dir /absolute/path/topic_modelling_output \
   --embedding-model deepvk/USER-bge-m3 \
   --num-topics 10 \
   --top-words 10 \
@@ -126,15 +120,7 @@ python fuzzy_bertopic_paper_pipeline.py \
 - По умолчанию скрипт переиспользует `paper_doc_embeddings.npy` и `paper_doc_embeddings_reduced.npy`, если размерности совпадают.
 - Для отключения используйте `--no-reuse-embeddings`.
 
-Папка с результатами тематического моделирования в этом проекте:
-
-- `topic_modelling_results/`:
-  - `paper_doc_topics.jsonl`
-  - `paper_topic_info.jsonl`
-  - `paper_style_fuzzy_metrics.csv`
-  - `paper_topic_coherence_fuzzy_analysis.csv`
-  - `paper_style_topic_semantic_coherence.csv`
-- Результаты тематического моделирования также можно смотреть в `bertopic_lda_analysis.ipynb`.
+В каталоге `--output-dir` появятся `paper_doc_topics.jsonl`, `paper_topic_info.jsonl`, эмбеддинги и при необходимости другие файлы; метрики когерентности и таблицы из ноутбука — по путям, которые вы зададите при анализе. Визуализации и расчёты — в `bertopic_lda_analysis.ipynb` (пути к `paper_*` артефактам задайте в первых ячейках).
 
 ## Ноутбуки
 
@@ -147,3 +133,30 @@ python fuzzy_bertopic_paper_pipeline.py \
   - содержит блоки для LDA-сравнения.
 
 Перед запуском ноутбуков проверьте пути к входным файлам в первых ячейках.
+
+## Публикация изменений в GitHub
+
+Из корня репозитория:
+
+```bash
+git add .
+git status
+git commit -m "Краткое описание изменений"
+git push origin main
+```
+
+Если push отклонён (`fetch first`): сначала подтяните удалённую ветку и снова отправьте:
+
+```bash
+git pull origin main --no-rebase
+git push origin main
+```
+
+Если нужно **перезаписать** `main` на GitHub своей локальной версией (осторожно: потеряете коммиты, которых нет у вас локально):
+
+```bash
+git fetch origin
+git push origin main --force-with-lease
+```
+
+Если после `fetch` снова отказ — только если вы уверены: `git push origin main --force`.
