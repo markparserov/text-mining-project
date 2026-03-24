@@ -1,0 +1,51 @@
+Пайплайн обработки текстов (textmining)
+
+1) Точка входа
+- Команда: python -m pipeline.cli process
+- Основные параметры: input-dir, output, checkpoint-dir, max-workers, timeout, use-vllm-only, vllm-base-url/model/api-key.
+
+2) Загрузка конфигурации
+- .env подхватывается через dotenv.
+- В режиме use-vllm-only токен GigaChat не обязателен.
+- URL/модель/ключ vLLM могут приходить из CLI и/или .env.
+
+3) Обнаружение и подготовка источников
+- Рекурсивно собираются файлы из input-dir.
+- Поддерживаются: .docx, .doc, .rtf.
+- Служебные/временные файлы отбрасываются.
+- Дубликаты по stem в одной папке дедуплицируются с приоритетом: docx > doc > rtf.
+- Из пути извлекаются year и reviewer_id.
+
+4) Извлечение текста
+- .docx: python-docx (параграфы + таблицы).
+- .rtf: striprtf, затем очистка от бинарного/шрифтового мусора; при необходимости fallback через LibreOffice (soffice --headless --convert-to txt).
+- .doc: сначала конвертация через LibreOffice в txt (предпочтительно); если не вышло, fallback через OLE-стримы + многоступенчатая фильтрация шума.
+
+5) LLM-обработка (2 прохода)
+- Pass 1 (extract_reviews): из исходного текста выделяются отдельные рецензии и метаданные.
+- Pass 2 (segment_review): каждая очищенная рецензия делится на тематические секции.
+- В vLLM-режиме используется OpenAI-совместимый endpoint /v1/chat/completions.
+- Для Qwen принудительно отключено thinking: chat_template_kwargs.enable_thinking=false.
+- Включен строгий JSON-режим (response_format=json_object), затем многоступенчатый парсинг:
+  content / reasoning / function_call.arguments / tool_calls[].function.arguments, плюс repair-pass при невалидном JSON.
+
+6) Нормализация и валидация
+- Ответы моделей приводятся к единой схеме (Pass1Result/Pass2Result).
+- None/шумовые фрагменты очищаются; пустые review_text могут заменяться на маркер __RAW_TEXT__.
+- Если review_text == __RAW_TEXT__, в Pass 2 подается полный raw_text документа.
+- Плейсхолдеры для неполных метаданных:
+  book_authors -> "Не указан автор книги", book_title -> "Не указано название книги".
+
+7) Параллельность и устойчивость
+- Обработка источников идет последовательно или через ThreadPoolExecutor (max-workers 1..64).
+- На каждый файл создается отдельный клиент, затем закрывается.
+- Результаты статусов:
+  processed (запись(и) в output + путь в checkpoint),
+  skipped (только для garbage-источников),
+  failed (ошибка без добавления в checkpoint; можно ретраить).
+
+8) Выходные артефакты
+- Основной результат: JSONL (одна запись ReviewRecord на рецензию).
+- Чекпоинт: checkpoint-dir/processed_sources.txt.
+- Логи: INFO/WARNING/ERROR с финальной сводкой:
+  total, processed, skipped, failed, records, output.

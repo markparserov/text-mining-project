@@ -1,3 +1,7 @@
+тексты/
+output/
+.checkpoints*/
+
 .DS_Store
 .qodo
 __pycache__/

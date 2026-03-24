@@ -1,0 +1,105 @@
+Схема данных после прогона одного текста через LLM
+
+Контекст:
+- Один исходный документ (docx/doc/rtf) может содержать 0..N рецензий.
+- Обработка идет в 2 LLM-прохода:
+  1) Pass 1: извлечение рецензий и метаданных.
+  2) Pass 2: сегментация каждой рецензии на разделы.
+
+------------------------------------------------------------
+1) Pass 1 (extract_reviews) — сырой LLM-ответ по документу
+------------------------------------------------------------
+Формат (ожидаемый JSON-объект):
+{
+  "book_authors_csv": [string],
+  "book_titles": [string],
+  "book_references": [string],
+  "nominations": [string],
+  "rating_overalls": [string],
+  "rating_details_serialized": [string],
+  "review_texts_clean": [string]
+}
+
+Правила:
+- Это параллельные массивы одинаковой логической длины.
+- Элемент с индексом i во всех массивах относится к одной рецензии.
+- Возможны пустые строки; в нормализации None приводится к "".
+
+------------------------------------------------------------
+2) Pass 1 после нормализации (Pass1Result)
+------------------------------------------------------------
+Формат:
+{
+  "reviews": [
+    {
+      "book_authors": [string],            // min_length=1 (в пайплайне есть fallback)
+      "book_title": string,                // min_length=1 (в пайплайне есть fallback)
+      "book_reference": string | null,
+      "nomination": string | null,
+      "rating_overall": string | null,     // только число/десятичное, иначе null
+      "rating_details": [
+        {"criterion": string, "value": string}
+      ] | null,
+      "review_text_clean": string          // min_length=1; может быть "__RAW_TEXT__"
+    }
+  ]
+}
+
+Особенности:
+- Если review_text_clean пуст, но есть полезные метаданные, ставится "__RAW_TEXT__".
+- Если нет авторов: ["Не указан автор книги"].
+- Если нет названия: "Не указано название книги".
+
+------------------------------------------------------------
+3) Pass 2 (segment_review) — по каждой рецензии отдельно
+------------------------------------------------------------
+Вход в Pass 2:
+- Если review_text_clean == "__RAW_TEXT__", в Pass 2 передается весь raw_text документа.
+- Иначе передается review_text_clean.
+
+Ожидаемый JSON:
+{
+  "section_titles": [string],
+  "section_descriptions": [string],
+  "section_texts": [string]
+}
+
+После нормализации (Pass2Result):
+{
+  "sections": [
+    {
+      "title": string,
+      "description": string,
+      "text": string
+    }
+  ] // min_length=1
+}
+
+------------------------------------------------------------
+4) Финальная запись в output JSONL (ReviewRecord)
+------------------------------------------------------------
+Для каждой рецензии формируется 1 строка JSONL:
+{
+  "year": int,                             // 1900..2100
+  "reviewer_id": string,                   // например "R14"
+  "book_authors": [string],                // min_length=1
+  "book_title": string,                    // min_length=1
+  "book_reference": string | null,
+  "nomination": string | null,
+  "review_text_raw": string,               // полный извлеченный текст документа
+  "review_text_clean": string,             // очищенный/или raw-text fallback
+  "sections": [
+    {
+      "title": string,
+      "description": string,
+      "text": string
+    }
+  ],                                       // min_length=1
+  "rating_overall": string | null,
+  "rating_details": {string: string} | null, // criterion -> value
+  "source_path": string                    // абсолютный путь исходного файла
+}
+
+Итог:
+- 1 входной документ => 0..N строк в output JSONL.
+- Если Pass 1 не дал валидных рецензий: 0 строк для документа.
